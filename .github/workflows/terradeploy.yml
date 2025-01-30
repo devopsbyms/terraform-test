@@ -1,0 +1,102 @@
+name: Terraform Deployment
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=terraform-storage-rg" \
+            -backend-config="storage_account_name=terraformstatexlrwdrzs" \
+            -backend-config="container_name=tfstatefiles" \
+            -backend-config="key=aks-base.tfstate"
+        working-directory: ./terraform-manifests
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ./terraform-manifests
+
+  deploy-dev-aks:
+    name: Deploy Dev AKS Cluster
+    runs-on: ubuntu-latest
+    environment: dev
+    needs: terraform-validate
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+
+      - name: Download SSH Key
+        run: echo "${{ secrets.SSH_KEY }}" > aks-terraform-devops-ssh-key-ububtu.pub
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=terraform-storage-rg" \
+            -backend-config="storage_account_name=terraformstatexlrwdrzs" \
+            -backend-config="container_name=tfstatefiles" \
+            -backend-config="key=aks-dev.tfstate"
+        working-directory: ./terraform-manifests
+
+      - name: Terraform Plan
+        run: |
+          terraform plan -var ssh_public_key=aks-terraform-devops-ssh-key-ububtu.pub -var environment=dev -out=tfplan
+        working-directory: ./terraform-manifests
+
+      - name: Terraform Apply
+        run: terraform apply tfplan
+        working-directory: ./terraform-manifests
+
+  deploy-qa-aks:
+    name: Deploy QA AKS Cluster
+    runs-on: ubuntu-latest
+    environment: qa
+    needs: deploy-dev-aks
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: latest
+
+      - name: Download SSH Key
+        run: echo "${{ secrets.SSH_KEY }}" > aks-terraform-devops-ssh-key-ububtu.pub
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=terraform-storage-rg" \
+            -backend-config="storage_account_name=terraformstatexlrwdrzs" \
+            -backend-config="container_name=tfstatefiles" \
+            -backend-config="key=aks-qa.tfstate"
+        working-directory: ./terraform-manifests
+
+      - name: Terraform Plan
+        run: |
+          terraform plan -var ssh_public_key=aks-terraform-devops-ssh-key-ububtu.pub -var environment=qa -out=tfplan
+        working-directory: ./terraform-manifests
+
+      - name: Terraform Apply
+        run: terraform apply tfplan
+        working-directory: ./terraform-manifests
